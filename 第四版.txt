@@ -1,0 +1,143 @@
+帮我修改：底部导航栏平均分，并且简单做一点动态。然后主页那一栏去掉总资产改成图片的样式
+以下代码可做参考
+// 在 Index 类中添加以下状态
+@State homeScale: number = 1
+@State recordScale: number = 1
+
+@Builder
+HomeTab() {
+  Scroll() {
+    Column() {
+      // 模仿图片顶部的“收益日历”标题
+      Row() {
+        Text('收益日历')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+        
+        // 模仿图片顶部的蓝色小胶囊标签
+        Row() {
+          Image($r('app.media.link_icon')).width(12).margin({ right: 4 }) // 假设有图标
+          Text('您本月已连续12天正收益...')
+            .fontSize(12)
+            .fontColor('#007DFF')
+        }
+        .backgroundColor('#E6F2FF')
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .borderRadius(12)
+        .margin({ left: 10 })
+      }
+      .width('90%')
+      .justifyContent(FlexAlign.Start)
+      .margin({ top: 20, bottom: 16 })
+
+      // 替换原本的总资产块 -> 仿图片日历/统计块
+      Column() {
+        // 日/周/月/年 切换按钮组
+        Row() {
+          ForEach(['日', '周', '月', '年'], (item) => {
+            Text(item)
+              .fontSize(14)
+              .fontColor(this.summaryMode === item.toLowerCase() ? '#007DFF' : '#666666')
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .padding({ top: 8, bottom: 8 })
+              .backgroundColor(this.summaryMode === item.toLowerCase() ? '#FFFFFF' : 'transparent')
+              .borderRadius(8)
+              .onClick(() => this.changeSummaryMode(item.toLowerCase() as any))
+          })
+        }
+        .width('100%')
+        .backgroundColor('#F0F0F0')
+        .borderRadius(10)
+        .padding(2)
+
+        // 日期展示区 (2026年3月)
+        Row() {
+          Text('<').fontColor('#999999').onClick(() => this.shiftSummaryDate(-1))
+          Text(this.getSummaryPeriodText())
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+            .margin({ left: 20, right: 20 })
+          Text('>').fontColor('#999999').onClick(() => this.shiftSummaryDate(1))
+        }
+        .margin({ top: 20, bottom: 20 })
+
+        // 数据简报
+        Row() {
+          this.SummaryItem('本期收入', `+${this.summaryIncome.toFixed(2)}`, '#52C41A')
+          this.SummaryItem('本期支出', `-${this.summaryExpense.toFixed(2)}`, '#FF4D4F')
+        }
+        .width('100%')
+      }
+      .width('94%')
+      .padding(16)
+      .backgroundColor('#FFFFFF')
+      .borderRadius(16)
+      .shadow({ radius: 10, color: '#10000000' })
+
+      // 这里可以继续放置日历组件的具体渲染逻辑...
+    }
+  }
+}
+
+@Builder
+SummaryItem(label: string, value: string, color: string) {
+  Column() {
+    Text(label).fontSize(12).fontColor('#999999')
+    Text(value).fontSize(20).fontWeight(FontWeight.Bold).fontColor(color).margin({ top: 4 })
+  }.layoutWeight(1)
+}
+
+@Builder
+BottomNavBar() {
+  Row() {
+    // 按钮 1：主页
+    Column() {
+      HomeIcon({ isSelected: this.activeTab === 'home' })
+      Text('主页')
+        .fontSize(12)
+        .fontColor(this.activeTab === 'home' ? '#36D1DC' : '#999999')
+        .margin({ top: 4 })
+    }
+    .layoutWeight(1)
+    .scale({ x: this.homeScale, y: this.homeScale }) // 绑定缩放
+    .onClick(() => {
+      animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+        this.activeTab = 'home'
+        this.homeScale = 1.1 // 点击瞬间放大
+      })
+      setTimeout(() => { this.homeScale = 1.0 }, 200) // 恢复原状
+      this.recordScale = 1.0
+    })
+
+    // 按钮 2：记账 (现在的平均分布)
+    Column() {
+      // 如果处于记账页，显示“+”号感，否则显示普通图标
+      RecordIcon({ isSelected: this.activeTab === 'record' })
+      Text(this.activeTab === 'record' ? '新增' : '记账')
+        .fontSize(12)
+        .fontColor(this.activeTab === 'record' ? '#36D1DC' : '#999999')
+        .margin({ top: 4 })
+    }
+    .layoutWeight(1)
+    .scale({ x: this.recordScale, y: this.recordScale })
+    .onClick(() => {
+      animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+        if (this.activeTab === 'record') {
+          this.showAddDialog = true
+        } else {
+          this.activeTab = 'record'
+        }
+        this.recordScale = 1.1
+      })
+      setTimeout(() => { this.recordScale = 1.0 }, 200)
+      this.homeScale = 1.0
+    })
+  }
+  .width('100%')
+  .height(70)
+  .backgroundColor('#FFFFFF')
+  .border({ width: { top: 0.5 }, color: '#EEEEEE' })
+  .position({ x: 0, y: '100%' })
+  .translate({ y: -70 }) // 固定在底部
+}

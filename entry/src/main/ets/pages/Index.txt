@@ -1,0 +1,984 @@
+import { Record } from '../common/Record'
+import { RecordStore } from '../common/RecordStore'
+import { CategoryItem, ExpenseCategories, IncomeCategories, getCategoryById } from '../common/Category'
+
+class GroupedRecords {
+  date: string
+  dateDisplay: string
+  records: Record[]
+
+  constructor(date: string, dateDisplay: string, records: Record[]) {
+    this.date = date
+    this.dateDisplay = dateDisplay
+    this.records = records
+  }
+}
+
+class DayCellData {
+  key: string
+  dayNumber: number
+  dayText: string
+  valueText: string
+  valueColor: string
+  inCurrentMonth: boolean
+  isSelected: boolean
+
+  constructor(key: string, dayNumber: number, dayText: string, valueText: string, valueColor: string, inCurrentMonth: boolean, isSelected: boolean) {
+    this.key = key
+    this.dayNumber = dayNumber
+    this.dayText = dayText
+    this.valueText = valueText
+    this.valueColor = valueColor
+    this.inCurrentMonth = inCurrentMonth
+    this.isSelected = isSelected
+  }
+}
+
+class DayRowData {
+  key: string
+  cells: DayCellData[]
+
+  constructor(key: string, cells: DayCellData[]) {
+    this.key = key
+    this.cells = cells
+  }
+}
+
+class MetricBlockData {
+  key: string
+  title: string
+  valueText: string
+  valueColor: string
+  isSelected: boolean
+  isPlaceholder: boolean
+
+  constructor(key: string, title: string, valueText: string, valueColor: string, isSelected: boolean, isPlaceholder: boolean) {
+    this.key = key
+    this.title = title
+    this.valueText = valueText
+    this.valueColor = valueColor
+    this.isSelected = isSelected
+    this.isPlaceholder = isPlaceholder
+  }
+}
+
+@Component
+struct HomeIcon {
+  @Prop isSelected: boolean = false
+
+  build() {
+    Column() {
+      Polygon()
+        .width(20)
+        .height(10)
+        .points([[10, 0], [0, 10], [20, 10]])
+        .fill(this.isSelected ? '#36D1DC' : '#999999')
+
+      Rect()
+        .width(16)
+        .height(10)
+        .fill(this.isSelected ? '#36D1DC' : '#999999')
+        .margin({ top: -1 })
+    }
+    .justifyContent(FlexAlign.Center)
+    .width(24)
+    .height(24)
+  }
+}
+
+@Component
+struct RecordIcon {
+  @Prop isSelected: boolean = false
+
+  build() {
+    Stack() {
+      Rect()
+        .width(18)
+        .height(22)
+        .radius(2)
+        .fill(this.isSelected ? '#36D1DC' : '#999999')
+
+      Column() {
+        Rect().width(10).height(1).fill('#FFFFFF').margin({ bottom: 2 })
+        Rect().width(10).height(1).fill('#FFFFFF').margin({ bottom: 2 })
+        Rect().width(10).height(1).fill('#FFFFFF')
+      }
+
+      Text('+')
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#FFFFFF')
+        .margin({ top: 1 })
+    }
+    .width(24)
+    .height(24)
+  }
+}
+
+@Entry
+@Component
+struct Index {
+  @State activeTab: 'home' | 'record' = 'home'
+  @State totalBalance: number = 0
+  @State allRecords: Record[] = []
+  @State groupedRecords: GroupedRecords[] = []
+  @State showAddDialog: boolean = false
+  @State isLoading: boolean = true
+
+  @State summaryMode: 'day' | 'week' | 'month' | 'year' = 'month'
+  @State summaryDate: Date = new Date()
+  @State selectedDay: number = new Date().getDate()
+  @State homeScale: number = 1
+  @State recordScale: number = 1
+
+  @State recordType: 'income' | 'expense' = 'expense'
+  @State amount: string = ''
+  @State selectedCategory: string = 'food'
+  @State selectedDate: Date = new Date()
+  @State note: string = ''
+
+  private recordStore = RecordStore.getInstance()
+
+  async aboutToAppear() {
+    await this.loadData()
+  }
+
+  async loadData() {
+    this.isLoading = true
+    try {
+      this.totalBalance = await this.recordStore.calculateBalance()
+      const records = await this.recordStore.getAllRecords()
+      this.allRecords = records
+      this.groupedRecords = this.groupByDate(records)
+    } catch (e) {
+      console.error('加载数据失败:', e)
+    }
+    this.isLoading = false
+  }
+
+  groupByDate(records: Record[]): GroupedRecords[] {
+    const map = new Map<string, Record[]>()
+    for (const record of records) {
+      if (!map.has(record.date)) {
+        map.set(record.date, [])
+      }
+      map.get(record.date)!.push(record)
+    }
+
+    const result: GroupedRecords[] = []
+    const sortedDates = Array.from(map.keys()).sort((a, b) => b.localeCompare(a))
+    for (const date of sortedDates) {
+      const dateRecords = map.get(date)!
+      dateRecords.sort((a, b) => b.createTime - a.createTime)
+      result.push(new GroupedRecords(date, this.formatDateDisplay(date), dateRecords))
+    }
+    return result
+  }
+
+  formatDateDisplay(dateStr: string): string {
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    const todayStr = this.formatDate(today)
+    const yesterdayStr = this.formatDate(yesterday)
+
+    if (dateStr === todayStr) {
+      return '今天'
+    }
+    if (dateStr === yesterdayStr) {
+      return '昨天'
+    }
+    const date = new Date(dateStr)
+    return `${date.getMonth() + 1}月${date.getDate()}日`
+  }
+
+  formatDate(date: Date): string {
+    const year = date.getFullYear()
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    const day = date.getDate().toString().padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  getWeekStart(date: Date): Date {
+    const start = new Date(date)
+    const weekDay = start.getDay()
+    const offset = weekDay === 0 ? 6 : weekDay - 1
+    start.setDate(start.getDate() - offset)
+    start.setHours(0, 0, 0, 0)
+    return start
+  }
+
+  changeSummaryMode(mode: 'day' | 'week' | 'month' | 'year') {
+    this.summaryMode = mode
+  }
+
+  shiftSummaryDate(step: number) {
+    const temp = new Date(this.summaryDate)
+    if (this.summaryMode === 'day' || this.summaryMode === 'week') {
+      temp.setMonth(temp.getMonth() + step)
+      const daysInMonth = new Date(temp.getFullYear(), temp.getMonth() + 1, 0).getDate()
+      this.selectedDay = Math.min(this.selectedDay, daysInMonth)
+      temp.setDate(this.selectedDay)
+    } else {
+      temp.setFullYear(temp.getFullYear() + step)
+    }
+    this.summaryDate = temp
+  }
+
+  getDailyNetByDate(dateStr: string): number {
+    let income = 0
+    let expense = 0
+    for (const record of this.allRecords) {
+      if (record.date !== dateStr) {
+        continue
+      }
+      if (record.type === 'income') {
+        income += record.amount
+      } else {
+        expense += record.amount
+      }
+    }
+    return income - expense
+  }
+
+  getNetBetween(start: Date, end: Date): number {
+    let income = 0
+    let expense = 0
+    for (const record of this.allRecords) {
+      const d = new Date(record.date)
+      if (d < start || d > end) {
+        continue
+      }
+      if (record.type === 'income') {
+        income += record.amount
+      } else {
+        expense += record.amount
+      }
+    }
+    return income - expense
+  }
+
+  getMonthNet(year: number, month: number): number {
+    const start = new Date(year, month - 1, 1)
+    const end = new Date(year, month, 0)
+    return this.getNetBetween(start, end)
+  }
+
+  getYearNet(year: number): number {
+    const start = new Date(year, 0, 1)
+    const end = new Date(year, 11, 31)
+    return this.getNetBetween(start, end)
+  }
+
+  netColor(net: number): string {
+    if (net > 0) {
+      return '#52C41A'
+    }
+    if (net < 0) {
+      return '#FF4D4F'
+    }
+    return '#9E9E9E'
+  }
+
+  formatNetText(net: number): string {
+    if (net > 0) {
+      return `+${net.toFixed(2)}`
+    }
+    return net.toFixed(2)
+  }
+
+  getDayRows(): DayRowData[] {
+    const year = this.summaryDate.getFullYear()
+    const month = this.summaryDate.getMonth()
+    const firstWeekday = new Date(year, month, 1).getDay()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+    const cells: DayCellData[] = []
+    for (let i = 0; i < firstWeekday; i++) {
+      cells.push(new DayCellData(`blank-${i}`, 0, '', '', '#9E9E9E', false, false))
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateText = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+      const net = this.getDailyNetByDate(dateText)
+      const valueText = net === 0 ? '' : this.formatNetText(net)
+      cells.push(new DayCellData(`day-${day}`, day, `${day}`, valueText, this.netColor(net), true, this.selectedDay === day))
+    }
+
+    const rest = cells.length % 7
+    if (rest !== 0) {
+      for (let i = 0; i < 7 - rest; i++) {
+        cells.push(new DayCellData(`tail-${i}`, 0, '', '', '#9E9E9E', false, false))
+      }
+    }
+
+    const rows: DayRowData[] = []
+    const rowCount = cells.length / 7
+    for (let r = 0; r < rowCount; r++) {
+      rows.push(new DayRowData(`row-${r}`, cells.slice(r * 7, r * 7 + 7)))
+    }
+    return rows
+  }
+
+  getWeekBlocks(): MetricBlockData[] {
+    const year = this.summaryDate.getFullYear()
+    const month = this.summaryDate.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+    let start = this.getWeekStart(firstDay)
+    const selectedStart = this.getWeekStart(this.summaryDate)
+    const selectedKey = `${selectedStart.getFullYear()}-${(selectedStart.getMonth() + 1).toString().padStart(2, '0')}-${selectedStart.getDate().toString().padStart(2, '0')}`
+    const blocks: MetricBlockData[] = []
+
+    while (start <= lastDay) {
+      const end = new Date(start)
+      end.setDate(start.getDate() + 6)
+      const key = `${start.getFullYear()}-${(start.getMonth() + 1).toString().padStart(2, '0')}-${start.getDate().toString().padStart(2, '0')}`
+      const title = `${start.getMonth() + 1}.${start.getDate()}-${end.getMonth() + 1}.${end.getDate()}`
+      const net = this.getNetBetween(start, end)
+      blocks.push(new MetricBlockData(key, title, net === 0 ? '' : this.formatNetText(net), this.netColor(net), key === selectedKey, false))
+      start = new Date(start)
+      start.setDate(start.getDate() + 7)
+    }
+    return blocks
+  }
+
+  getMonthBlocks(): MetricBlockData[] {
+    const year = this.summaryDate.getFullYear()
+    const blocks: MetricBlockData[] = []
+    for (let m = 1; m <= 12; m++) {
+      const net = this.getMonthNet(year, m)
+      blocks.push(new MetricBlockData(`month-${m}`, `${m}月`, net === 0 ? '' : this.formatNetText(net), this.netColor(net), m === this.summaryDate.getMonth() + 1, false))
+    }
+    return blocks
+  }
+
+  getYearBlocks(): MetricBlockData[] {
+    const currentYear = new Date().getFullYear()
+    let minYear = currentYear
+    for (const record of this.allRecords) {
+      const y = new Date(record.date).getFullYear()
+      if (y < minYear) {
+        minYear = y
+      }
+    }
+
+    const count = Math.min(6, currentYear - minYear + 1)
+    const blocks: MetricBlockData[] = []
+    for (let i = 0; i < count; i++) {
+      const year = currentYear - i
+      const net = this.getYearNet(year)
+      blocks.push(new MetricBlockData(`year-${year}`, `${year}`, net === 0 ? '' : this.formatNetText(net), this.netColor(net), year === this.summaryDate.getFullYear(), false))
+    }
+    for (let i = count; i < 6; i++) {
+      blocks.push(new MetricBlockData(`placeholder-${i}`, '', '', '#9E9E9E', false, true))
+    }
+    return blocks
+  }
+
+  selectDayCell(cell: DayCellData) {
+    if (!cell.inCurrentMonth) {
+      return
+    }
+    this.selectedDay = cell.dayNumber
+    this.summaryDate = new Date(this.summaryDate.getFullYear(), this.summaryDate.getMonth(), cell.dayNumber)
+  }
+
+  selectWeekBlock(block: MetricBlockData) {
+    if (block.isPlaceholder) {
+      return
+    }
+    const parts = block.key.split('-')
+    if (parts.length !== 3) {
+      return
+    }
+    this.summaryDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+  }
+
+  selectMonthBlock(block: MetricBlockData) {
+    if (block.isPlaceholder) {
+      return
+    }
+    const month = Number(block.key.replace('month-', ''))
+    if (month <= 0) {
+      return
+    }
+    this.summaryDate = new Date(this.summaryDate.getFullYear(), month - 1, 1)
+  }
+
+  selectYearBlock(block: MetricBlockData) {
+    if (block.isPlaceholder) {
+      return
+    }
+    const year = Number(block.key.replace('year-', ''))
+    if (year <= 0) {
+      return
+    }
+    this.summaryDate = new Date(year, 0, 1)
+  }
+
+  getCategories() {
+    return this.recordType === 'expense' ? ExpenseCategories : IncomeCategories
+  }
+
+  async addRecord() {
+    const amountNum = parseFloat(this.amount)
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return
+    }
+
+    const category = getCategoryById(this.recordType, this.selectedCategory)
+    const dateStr = this.formatDate(this.selectedDate)
+
+    const record = new Record(
+      this.recordType,
+      amountNum,
+      this.selectedCategory,
+      category.name,
+      dateStr,
+      this.note
+    )
+
+    await this.recordStore.addRecord(record)
+    this.amount = ''
+    this.note = ''
+    this.selectedCategory = this.recordType === 'expense' ? 'food' : 'salary'
+    this.selectedDate = new Date()
+    this.showAddDialog = false
+    await this.loadData()
+  }
+
+  async deleteRecord(id: string) {
+    await this.recordStore.deleteRecord(id)
+    await this.loadData()
+  }
+
+  build() {
+    Stack() {
+      Column() {
+        if (this.activeTab === 'home') {
+          this.HomeTab()
+        } else {
+          this.RecordTab()
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#F5F5F5')
+
+      if (this.showAddDialog) {
+        this.AddRecordDialog()
+      }
+
+      this.BottomNavBar()
+    }
+  }
+
+  @Builder
+  HomeTab() {
+    Scroll() {
+      Column() {
+        Column() {
+          Row() {
+            Text('日')
+              .fontSize(16)
+              .fontWeight(this.summaryMode === 'day' ? FontWeight.Medium : FontWeight.Regular)
+              .fontColor(this.summaryMode === 'day' ? '#007DFF' : '#666666')
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.changeSummaryMode('day')
+              })
+            Text('月')
+              .fontSize(16)
+              .fontWeight(this.summaryMode === 'month' ? FontWeight.Medium : FontWeight.Regular)
+              .fontColor(this.summaryMode === 'month' ? '#007DFF' : '#666666')
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.changeSummaryMode('month')
+              })
+            Text('年')
+              .fontSize(16)
+              .fontWeight(this.summaryMode === 'year' ? FontWeight.Medium : FontWeight.Regular)
+              .fontColor(this.summaryMode === 'year' ? '#007DFF' : '#666666')
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.changeSummaryMode('year')
+              })
+          }
+          .width('100%')
+
+          Row() {
+            Row() {
+              Text('‹')
+                .fontSize(34)
+                .fontColor('#BBBBBB')
+            }
+            .width('24%')
+            .height(56)
+            .backgroundColor('#FAFAFA')
+            .borderRadius(18)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => {
+              this.shiftSummaryDate(-1)
+            })
+
+            Row() {
+              Text(this.summaryMode === 'year' ? `${this.summaryDate.getFullYear()}年` : `${this.summaryDate.getFullYear()}年 ${(this.summaryDate.getMonth() + 1)}月`)
+                .fontSize(24)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#2F2F2F')
+            }
+            .layoutWeight(1)
+            .height(56)
+            .backgroundColor('#FAFAFA')
+            .borderRadius(18)
+            .justifyContent(FlexAlign.Center)
+            .margin({ left: 10, right: 10 })
+
+            Row() {
+              Text('›')
+                .fontSize(34)
+                .fontColor('#E0E0E0')
+            }
+            .width('24%')
+            .height(56)
+            .backgroundColor('#FAFAFA')
+            .borderRadius(18)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => {
+              this.shiftSummaryDate(1)
+            })
+          }
+          .width('100%')
+          .margin({ top: 16, bottom: 14 })
+
+          if (this.summaryMode === 'day') {
+            Row() {
+              Text('日').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('一').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('二').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('三').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('四').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('五').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('六').fontSize(16).fontColor('#303030').layoutWeight(1).textAlign(TextAlign.Center)
+            }
+            .width('100%')
+            .margin({ bottom: 10 })
+
+            ForEach(this.getDayRows(), (row: DayRowData) => {
+              Row() {
+                ForEach(row.cells, (cell: DayCellData) => {
+                  this.DayCell(cell)
+                })
+              }
+              .width('100%')
+              .margin({ bottom: 6 })
+            })
+          } else if (this.summaryMode === 'week') {
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.getWeekBlocks(), (block: MetricBlockData) => {
+                this.MetricBlock(block, () => {
+                  this.selectWeekBlock(block)
+                })
+              })
+            }
+            .width('100%')
+          } else if (this.summaryMode === 'month') {
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.getMonthBlocks(), (block: MetricBlockData) => {
+                this.MetricBlock(block, () => {
+                  this.selectMonthBlock(block)
+                })
+              })
+            }
+            .width('100%')
+          } else {
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.getYearBlocks(), (block: MetricBlockData) => {
+                this.MetricBlock(block, () => {
+                  this.selectYearBlock(block)
+                })
+              })
+            }
+            .width('100%')
+          }
+        }
+        .width('94%')
+        .padding(14)
+        .backgroundColor('#FFFFFF')
+        .borderRadius(18)
+        .shadow({ radius: 10, color: '#12000000', offsetX: 0, offsetY: 2 })
+        .margin({ top: 24, bottom: 100 })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  DayCell(cell: DayCellData) {
+    Column() {
+      Text(cell.dayText)
+        .fontSize(18)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(cell.isSelected ? '#FFFFFF' : (cell.inCurrentMonth ? '#2D2D2D' : '#D0D0D0'))
+
+      Text(cell.valueText)
+        .fontSize(14)
+        .fontColor(cell.valueColor)
+        .margin({ top: 8 })
+    }
+    .layoutWeight(1)
+    .height(78)
+    .justifyContent(FlexAlign.Center)
+    .borderRadius(16)
+    .backgroundColor(cell.isSelected ? '#A5A6AA' : (cell.inCurrentMonth ? '#F3F3F4' : 'transparent'))
+    .shadow(cell.isSelected ? { radius: 8, color: '#22000000', offsetX: 0, offsetY: 2 } : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+    .margin({ left: 2, right: 2 })
+    .onClick(() => {
+      this.selectDayCell(cell)
+    })
+  }
+
+  @Builder
+  MetricBlock(block: MetricBlockData, onTap: () => void) {
+    Column() {
+      Text(block.title)
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(block.isPlaceholder ? '#D0D0D0' : (block.isSelected ? '#FFFFFF' : '#333333'))
+
+      Text(block.valueText)
+        .fontSize(14)
+        .fontColor(block.valueColor)
+        .margin({ top: 8 })
+    }
+    .width('31%')
+    .height(74)
+    .justifyContent(FlexAlign.Center)
+    .borderRadius(14)
+    .backgroundColor(block.isPlaceholder ? 'transparent' : (block.isSelected ? '#A5A6AA' : '#F3F3F4'))
+    .margin({ left: '1%', right: '1%', bottom: 8 })
+    .onClick(() => {
+      onTap()
+    })
+  }
+
+  @Builder
+  RecordTab() {
+    Column() {
+      Text('记账')
+        .fontSize(24)
+        .fontWeight(FontWeight.Bold)
+        .margin({ top: 30, bottom: 16 })
+
+      Column() {
+        Text('当前总资产 (元)')
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+          .opacity(0.8)
+        Text(this.totalBalance.toFixed(2))
+          .fontSize(36)
+          .fontWeight(FontWeight.Bolder)
+          .fontColor('#FFFFFF')
+          .margin({ top: 8 })
+      }
+      .width('90%')
+      .height(140)
+      .backgroundColor('#36D1DC')
+      .borderRadius(20)
+      .justifyContent(FlexAlign.Center)
+
+      if (this.isLoading) {
+        Column() {
+          Text('加载中...')
+            .fontColor('#999999')
+        }
+        .margin({ top: 50 })
+      } else if (this.groupedRecords.length === 0) {
+        Column() {
+          Text('还没有记账记录哦，去记一笔吧~')
+            .fontColor('#999999')
+        }
+        .margin({ top: 50 })
+      } else {
+        Scroll() {
+          Column() {
+            ForEach(this.groupedRecords, (group: GroupedRecords) => {
+              Text(group.dateDisplay)
+                .fontSize(14)
+                .fontColor('#666666')
+                .margin({ top: 20, bottom: 10, left: 20 })
+                .alignSelf(ItemAlign.Start)
+
+              ForEach(group.records, (record: Record) => {
+                this.RecordItem(record)
+              })
+            })
+          }
+          .margin({ bottom: 86 })
+        }
+        .width('100%')
+        .margin({ top: 10 })
+        .layoutWeight(1)
+      }
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  BottomNavBar() {
+    Row() {
+      Column() {
+        HomeIcon({ isSelected: this.activeTab === 'home' })
+        Text('主页')
+          .fontSize(12)
+          .fontColor(this.activeTab === 'home' ? '#36D1DC' : '#999999')
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .scale({ x: this.homeScale, y: this.homeScale })
+      .animation({ duration: 140, curve: Curve.EaseOut })
+      .padding({ top: 10, bottom: 8 })
+      .onTouch((event) => {
+        if (event.type === TouchType.Down) {
+          this.homeScale = 0.95
+        }
+        if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+          this.homeScale = 1
+        }
+      })
+      .onClick(() => {
+        this.activeTab = 'home'
+        this.recordScale = 1
+      })
+
+      Column() {
+        RecordIcon({ isSelected: this.activeTab === 'record' })
+        Text(this.activeTab === 'record' ? '新增' : '记账')
+          .fontSize(12)
+          .fontColor(this.activeTab === 'record' ? '#36D1DC' : '#999999')
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .scale({ x: this.recordScale, y: this.recordScale })
+      .animation({ duration: 140, curve: Curve.EaseOut })
+      .padding({ top: 10, bottom: 8 })
+      .onTouch((event) => {
+        if (event.type === TouchType.Down) {
+          this.recordScale = 0.95
+        }
+        if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+          this.recordScale = 1
+        }
+      })
+      .onClick(() => {
+        this.homeScale = 1
+        if (this.activeTab === 'record') {
+          this.showAddDialog = true
+        } else {
+          this.activeTab = 'record'
+        }
+      })
+    }
+    .width('100%')
+    .height(70)
+    .backgroundColor('#FFFFFF')
+    .border({ width: { top: 1 }, color: '#EEEEEE' })
+    .position({ bottom: 0 })
+  }
+
+  @Builder
+  RecordItem(record: Record) {
+    Row() {
+      Text(getCategoryById(record.type, record.category).icon)
+        .fontSize(24)
+        .margin({ right: 12 })
+
+      Column() {
+        Text(record.categoryName)
+          .fontSize(16)
+          .fontColor('#333333')
+        if (record.note) {
+          Text(record.note)
+            .fontSize(12)
+            .fontColor('#999999')
+            .margin({ top: 2 })
+        }
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(`${record.type === 'income' ? '+' : '-'}${record.amount.toFixed(2)}`)
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(record.type === 'income' ? '#52C41A' : '#FF4D4F')
+
+      Button('删除')
+        .fontSize(12)
+        .backgroundColor('#FFF1F0')
+        .fontColor('#FF4D4F')
+        .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+        .margin({ left: 10 })
+        .onClick(() => {
+          this.deleteRecord(record.id)
+        })
+    }
+    .width('90%')
+    .padding(16)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(12)
+    .margin({ bottom: 8 })
+  }
+
+  @Builder
+  AddRecordDialog() {
+    Column()
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#80000000')
+      .onClick(() => {
+        this.showAddDialog = false
+      })
+
+    Column() {
+      Text('记账')
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .margin({ bottom: 20 })
+
+      Row() {
+        Text('类型')
+          .fontSize(16)
+          .fontColor('#333333')
+
+        Blank()
+
+        Row() {
+          Text('支出')
+            .fontSize(14)
+            .fontColor(this.recordType === 'expense' ? '#FFFFFF' : '#666666')
+            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+            .backgroundColor(this.recordType === 'expense' ? '#FF4D4F' : '#F0F0F0')
+            .borderRadius(20)
+            .onClick(() => {
+              this.recordType = 'expense'
+              this.selectedCategory = 'food'
+            })
+
+          Text('收入')
+            .fontSize(14)
+            .fontColor(this.recordType === 'income' ? '#FFFFFF' : '#666666')
+            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+            .backgroundColor(this.recordType === 'income' ? '#52C41A' : '#F0F0F0')
+            .borderRadius(20)
+            .margin({ left: 10 })
+            .onClick(() => {
+              this.recordType = 'income'
+              this.selectedCategory = 'salary'
+            })
+        }
+      }
+      .width('100%')
+      .margin({ bottom: 20 })
+
+      Row() {
+        Text('金额')
+          .fontSize(16)
+          .fontColor('#333333')
+
+        Blank()
+
+        TextInput({ text: this.amount, placeholder: '0.00' })
+          .width(150)
+          .type(InputType.NUMBER_DECIMAL)
+          .backgroundColor('#F5F5F5')
+          .borderRadius(8)
+          .padding(10)
+          .onChange((value) => {
+            this.amount = value
+          })
+
+        Text(' 元')
+          .fontSize(14)
+          .fontColor('#666666')
+      }
+      .width('100%')
+      .margin({ bottom: 20 })
+
+      Column() {
+        Text('分类')
+          .fontSize(16)
+          .fontColor('#333333')
+          .margin({ bottom: 10 })
+          .alignSelf(ItemAlign.Start)
+
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(this.getCategories(), (cat: CategoryItem) => {
+            Text(`${cat.icon} ${cat.name}`)
+              .fontSize(14)
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .backgroundColor(this.selectedCategory === cat.id ? '#36D1DC' : '#F0F0F0')
+              .fontColor(this.selectedCategory === cat.id ? '#FFFFFF' : '#333333')
+              .borderRadius(20)
+              .margin({ right: 8, bottom: 8 })
+              .onClick(() => {
+                this.selectedCategory = cat.id
+              })
+          })
+        }
+      }
+      .width('100%')
+      .margin({ bottom: 20 })
+
+      Row() {
+        Text('备注')
+          .fontSize(16)
+          .fontColor('#333333')
+
+        Blank()
+
+        TextInput({ text: this.note, placeholder: '可选' })
+          .width(150)
+          .backgroundColor('#F5F5F5')
+          .borderRadius(8)
+          .padding(10)
+          .onChange((value) => {
+            this.note = value
+          })
+      }
+      .width('100%')
+      .margin({ bottom: 30 })
+
+      Row() {
+        Button('取消')
+          .layoutWeight(1)
+          .backgroundColor('#F0F0F0')
+          .fontColor('#666666')
+          .onClick(() => {
+            this.showAddDialog = false
+          })
+
+        Button('保存')
+          .layoutWeight(1)
+          .margin({ left: 15 })
+          .backgroundColor('#36D1DC')
+          .fontColor('#FFFFFF')
+          .onClick(() => {
+            this.addRecord()
+          })
+      }
+    }
+    .width('90%')
+    .padding(20)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+    .position({ bottom: 78 })
+  }
+}
